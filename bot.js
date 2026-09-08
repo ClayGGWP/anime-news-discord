@@ -381,7 +381,7 @@ async function sendToDiscord(post) {
 
     const payload = {
       username:
-        "Anime News & Facts",
+        "Kim Jong Un",
 
       ...(avatar
         ? {

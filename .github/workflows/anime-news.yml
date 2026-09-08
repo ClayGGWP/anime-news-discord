@@ -1,21 +1,18 @@
-name: Anime News → Discord
+name: "Anime News -> Discord"
 
 on:
   workflow_dispatch:
-
   schedule:
-    - cron: "3/5 * * * *"
+    - cron: "*/5 * * * *"  # Esegue ogni 5 minuti (il minimo consentito da GitHub)
 
 permissions:
   contents: write
 
 jobs:
   check-news:
-
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Scarica repository
         uses: actions/checkout@v4
 
@@ -27,20 +24,19 @@ jobs:
       - name: Controlla AniNewsAndFacts
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-
         run: |
           node bot.js
 
       - name: Salva stato
         run: |
-          if git diff --quiet; then
+          if git diff --quiet state.json; then
             echo "Nessuna modifica."
             exit 0
           fi
 
-          git config user.name "Anime News Bot"
-          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add state.json
           git commit -m "Update Anime News state"
-          git push
+          git push origin main

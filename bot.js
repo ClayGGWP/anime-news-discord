@@ -31,65 +31,39 @@ function truncate(text, length) {
   return text.slice(0, length - 3) + "...";
 }
 
-async function getPosts() {
-  const username = "AniNewsAndFacts";
+const now = Date.now();
+const MAX_AGE = 10 * 60 * 1000; // 10 minuti
 
-  try {
-    const url = `https://api.vxtwitter.com/${username}?with_tweets=true`;
+return data.latest_tweets
+  .filter((tweet) => {
+    if (!tweet.date) return false;
 
-    console.log(`Tentativo di connessione a: ${url}`);
+    const tweetTime = new Date(tweet.date).getTime();
 
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": "AnimeNewsDiscordBot/1.0"
-      }
-    });
+    return now - tweetTime <= MAX_AGE;
+  })
+  .map((tweet) => ({
+    id: String(tweet.tweetID),
 
-    if (!response.ok) {
-      console.log(`Risposta non valida da VXTwitter: ${response.status}`);
-      console.log(await response.text());
-      return [];
-    }
+    text: tweet.text || "",
 
-    const data = await response.json();
+    url:
+      tweet.tweetURL ||
+      `https://x.com/${username}/status/${tweet.tweetID}`,
 
-    console.log(
-      `VXTwitter: recuperati ${data.latest_tweets?.length || 0} tweet`
-    );
+    created_at: tweet.date || null,
 
-    if (!Array.isArray(data.latest_tweets)) {
-      console.log("VXTwitter non ha restituito latest_tweets.");
-      console.log(data);
-      return [];
-    }
+    author: {
+      name: tweet.user_name || "Anime News And Facts",
+      screen_name: tweet.user_screen_name || username,
+      avatar_url: null
+    },
 
-    return data.latest_tweets.map((tweet) => ({
-      id: String(tweet.tweetID),
-
-      text: tweet.text || "",
-
-      url:
-        tweet.tweetURL ||
-        `https://x.com/${username}/status/${tweet.tweetID}`,
-
-      created_at: tweet.date || null,
-
-      author: {
-        name: tweet.user_name || "Anime News And Facts",
-        screen_name: tweet.user_screen_name || username,
-        avatar_url: null
-      },
-
-      media:
-        Array.isArray(tweet.mediaURLs) && tweet.mediaURLs.length > 0
-          ? tweet.mediaURLs[0]
-          : null
-    }));
-  } catch (err) {
-    console.error("Errore durante la chiamata a VXTwitter:", err.message);
-    return [];
-  }
-}
+    media:
+      Array.isArray(tweet.mediaURLs) && tweet.mediaURLs.length > 0
+        ? tweet.mediaURLs[0]
+        : null
+  }));
 
 async function sendToDiscord(post) {
   const author = post.author || {};

@@ -257,7 +257,19 @@ async function getPosts() {
           },
 
           media,
-          mediaType
+          mediaType,
+
+          stats: {
+            replies: tweet.replies ?? 0,
+            retweets: tweet.retweets ?? 0,
+            likes: tweet.likes ?? 0,
+          
+            views:
+              tweet.views ??
+              tweet.view_count ??
+              tweet.viewCount ??
+              null
+          }
         };
       })
       .filter(Boolean);
@@ -339,7 +351,7 @@ async function sendToDiscord(post) {
 
   const authorName =
     author.name ||
-    "Kim Jong Un";
+    USERNAME;
 
   const username =
     author.screen_name ||
@@ -380,17 +392,8 @@ async function sendToDiscord(post) {
     );
 
     const payload = {
-      username:
-        "Kim Jong Un",
-
-      ...(avatar
-        ? {
-            avatar_url: avatar
-          }
-        : {}),
-
-      content:
-        fxUrl
+      username: "Kim Jong Un",
+      content: fxUrl
     };
 
     const response =
@@ -447,6 +450,23 @@ async function sendToDiscord(post) {
     isoTimestamp =
       new Date().toISOString();
   }
+  
+  const stats = post.stats || {};
+
+  const statsParts = [
+    `💬 ${stats.replies ?? 0}`,
+    `🔁 ${stats.retweets ?? 0}`,
+    `❤️ ${stats.likes ?? 0}`
+  ];
+  
+  if (
+    stats.views !== null &&
+    stats.views !== undefined
+  ) {
+    statsParts.push(`👁️ ${stats.views}`);
+  }
+  
+  const statsText = statsParts.join("   ");
 
   const embed = {
     title:
@@ -456,6 +476,12 @@ async function sendToDiscord(post) {
       post.url,
 
     description,
+    fields: [
+      {
+        name: "\u200b",
+        value: statsText
+      }
+    ],
 
     color:
       0x5865f2,
@@ -498,19 +524,11 @@ async function sendToDiscord(post) {
   }
 
   const payload = {
-    username:
-      "Kim Jong Un",
-
-    ...(avatar
-      ? {
-          avatar_url: avatar
-        }
-      : {}),
-
-    embeds: [
-      embed
-    ]
-  };
+  username: "Kim Jong Un",
+  embeds: [
+    embed
+  ]
+};
 
   const response =
     await fetch(WEBHOOK, {

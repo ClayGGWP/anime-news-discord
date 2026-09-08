@@ -47,4 +47,4 @@ jobs:
 
           git add state.json
           git commit -m "Update Anime News state [skip ci]"
-          git push
+          git push origin HEAD:main

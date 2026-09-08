@@ -23,10 +23,7 @@ function saveState(ids) {
 }
 
 function cleanText(text) {
-  return text
-    .replace(/<[^>]*>?/gm, "") // Rimuove tag HTML del feed RSS
-    .replace(/https:\/\/t\.co\/\w+/g, "") // Rimuove t.co link
-    .trim();
+  return text.replace(/https:\/\/t\.co\/\w+/g, "").trim();
 }
 
 function truncate(text, length) {
@@ -35,13 +32,13 @@ function truncate(text, length) {
 }
 
 async function getPosts() {
-  const rssUrls = [
-    "https://rsshub.app/twitter/user/AniNewsAndFacts",
-    "https://nitter.privacydev.net/AniNewsAndFacts/rss",
-    "https://nitter.poast.org/AniNewsAndFacts/rss"
+  const endpoints = [
+    "https://api.fxtwitter.com/AniNewsAndFacts/latest",
+    "https://api.vxtwitter.com/AniNewsAndFacts/latest",
+    "https://api.fxtwitter.com/2/profile/AniNewsAndFacts"
   ];
 
-  for (const url of rssUrls) {
+  for (const url of endpoints) {
     try {
       console.log(`Tentativo di connessione a: ${url}`);
       const response = await fetch(url, {
@@ -55,46 +52,24 @@ async function getPosts() {
         continue;
       }
 
-      const xmlText = await response.text();
-      const items = [];
-      const itemRegex = /<item>([\s\S]*?)<\/item>/g;
-      let match;
+      const data = await response.json();
 
-      while ((match = itemRegex.exec(xmlText)) !== null) {
-        const itemContent = match[1];
+      // Formato array di tweet (fxtwitter / vxtwitter)
+      const tweets = data.tweets || (data.tweet ? [data.tweet] : []);
 
-        const title = (itemContent.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/) || itemContent.match(/<title>([\s\S]*?)<\/title>/))?.[1] || "";
-        const link = (itemContent.match(/<link>([\s\S]*?)<\/link>/))?.[1] || "";
-        const pubDate = (itemContent.match(/<pubDate>([\s\S]*?)<\/pubDate>/))?.[1] || "";
-        const description = (itemContent.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/) || itemContent.match(/<description>([\s\S]*?)<\/description>/))?.[1] || "";
-
-        // Estrae l'ID univoco del tweet dal link
-        const tweetId = link.split("/status/")[1]?.split("#")[0] || link.split("/").pop();
-
-        // Estrae la prima immagine allegata se presente
-        const imgMatch = description.match(/<img[^>]+src=["']([^"']+)["']/);
-        const imageUrl = imgMatch ? imgMatch[1] : null;
-
-        const cleanDesc = cleanText(description);
-
-        if (tweetId) {
-          items.push({
-            id: String(tweetId),
-            text: cleanDesc || cleanText(title),
-            url: `https://x.com/AniNewsAndFacts/status/${tweetId}`,
-            created_at: pubDate,
-            author: {
-              name: "Anime News And Facts",
-              screen_name: "AniNewsAndFacts"
-            },
-            media: imageUrl
-          });
-        }
-      }
-
-      if (items.length > 0) {
-        console.log(`Recuperati ${items.length} post da RSS.`);
-        return items;
+      if (tweets.length > 0) {
+        return tweets.map((t) => ({
+          id: String(t.id || t.tweet_id),
+          text: t.text || t.description || "",
+          url: t.url || t.tweetURL || `https://x.com/AniNewsAndFacts/status/${t.id || t.tweet_id}`,
+          created_at: t.created_at || t.date,
+          author: {
+            name: t.author?.name || t.user_name || "Anime News And Facts",
+            screen_name: t.author?.screen_name || t.user_screen_name || "AniNewsAndFacts",
+            avatar_url: t.author?.avatar_url || t.user_profile_image_url
+          },
+          media: t.media?.photos?.[0]?.url || (t.mediaURLs && t.mediaURLs[0]) || null
+        }));
       }
     } catch (err) {
       console.error(`Errore durante la chiamata a ${url}:`, err.message);
@@ -171,7 +146,7 @@ async function main() {
     return;
   }
 
-  // Filtra i post già salvati in state.json
+  // Filtra i post non ancora presenti in state.json
   const newPosts = posts.filter((p) => !state.ids.includes(p.id));
 
   if (newPosts.length === 0) {
@@ -179,7 +154,7 @@ async function main() {
     return;
   }
 
-  // Ordina dal più vecchio al più recente per inviarli in ordine cronologico
+  // Ordina per inviare prima i post meno recenti
   const sortedPosts = [...newPosts].reverse();
 
   for (const post of sortedPosts) {

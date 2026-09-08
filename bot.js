@@ -41,29 +41,33 @@ async function getPosts() {
 
     const response = await fetch(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0"
+        "User-Agent": "AnimeNewsDiscordBot/1.0"
       }
     });
 
     if (!response.ok) {
-      console.log(`Risposta non valida: ${response.status}`);
+      console.log(`Risposta non valida da VXTwitter: ${response.status}`);
       console.log(await response.text());
       return [];
     }
 
     const data = await response.json();
 
-    console.log("Risposta VXTwitter ricevuta.");
+    console.log(
+      `VXTwitter: recuperati ${data.latest_tweets?.length || 0} tweet`
+    );
 
-    if (!data.latest_tweets || !Array.isArray(data.latest_tweets)) {
+    if (!Array.isArray(data.latest_tweets)) {
       console.log("VXTwitter non ha restituito latest_tweets.");
       console.log(data);
       return [];
     }
 
     return data.latest_tweets.map((tweet) => ({
-      id: String(tweet.tweetID || tweet.id),
+      id: String(tweet.tweetID),
+
       text: tweet.text || "",
+
       url:
         tweet.tweetURL ||
         `https://x.com/${username}/status/${tweet.tweetID}`,
@@ -73,16 +77,16 @@ async function getPosts() {
       author: {
         name: tweet.user_name || "Anime News And Facts",
         screen_name: tweet.user_screen_name || username,
-        avatar_url: tweet.user_profile_image_url || null
+        avatar_url: null
       },
 
       media:
-        tweet.mediaURLs && tweet.mediaURLs.length > 0
+        Array.isArray(tweet.mediaURLs) && tweet.mediaURLs.length > 0
           ? tweet.mediaURLs[0]
           : null
     }));
   } catch (err) {
-    console.error("Errore VXTwitter:", err.message);
+    console.error("Errore durante la chiamata a VXTwitter:", err.message);
     return [];
   }
 }

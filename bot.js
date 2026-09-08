@@ -5,11 +5,11 @@ const STATE_FILE = "state.json";
 
 const USERNAME = "AniNewsAndFacts";
 
-// Il workflow gira ogni 5 minuti.
-// 10 minuti lascia un piccolo margine se una run parte in ritardo.
-const MAX_AGE_MS = 10 * 60 * 1000;
+// GitHub Actions può ritardare l'esecuzione.
+// 30 minuti evita di perdere un post senza
+// permettere il recupero di post molto vecchi.
+const MAX_AGE_MS = 30 * 60 * 1000;
 
-// Quanti tweet chiedere alla timeline.
 const POST_COUNT = 20;
 
 // ============================================================
@@ -19,7 +19,9 @@ const POST_COUNT = 20;
 function loadState() {
   try {
     if (fs.existsSync(STATE_FILE)) {
-      const data = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+      const data = JSON.parse(
+        fs.readFileSync(STATE_FILE, "utf8")
+      );
 
       if (Array.isArray(data.ids)) {
         return data;
@@ -34,11 +36,12 @@ function loadState() {
 
 function saveState(ids) {
   try {
-    // Manteniamo solo gli ultimi 200 ID.
-    // Non serve avere uno state.json infinito.
     const uniqueIds = [...new Set(ids)].slice(-200);
 
-    fs.writeFileSync(STATE_FILE, JSON.stringify({ ids: uniqueIds }, null, 2));
+    fs.writeFileSync(
+      STATE_FILE,
+      JSON.stringify({ ids: uniqueIds }, null, 2)
+    );
   } catch (e) {
     console.error("Errore scrittura state.json:", e);
   }
@@ -51,7 +54,9 @@ function saveState(ids) {
 function cleanText(text) {
   if (!text) return "";
 
-  return text.replace(/https:\/\/t\.co\/\w+/g, "").trim();
+  return text
+    .replace(/https:\/\/t\.co\/\w+/g, "")
+    .trim();
 }
 
 function truncate(text, length) {
@@ -71,14 +76,13 @@ function getFxTwitterUrl(postUrl) {
 }
 
 // ============================================================
-// RECUPERA POST DA FXTWITTER
+// RECUPERA POST DA VX TWITTER
 // ============================================================
 
 async function getPosts() {
-  const username = "AniNewsAndFacts";
-
   try {
-    const url = `https://api.vxtwitter.com/${username}?with_tweets=true`;
+    const url =
+      `https://api.vxtwitter.com/${USERNAME}?with_tweets=true`;
 
     console.log(`Connessione a: ${url}`);
 
@@ -97,8 +101,12 @@ async function getPosts() {
     const data = await response.json();
 
     if (!Array.isArray(data.latest_tweets)) {
-      console.error("VXTwitter non ha restituito latest_tweets.");
+      console.error(
+        "VXTwitter non ha restituito latest_tweets."
+      );
+
       console.log(JSON.stringify(data, null, 2));
+
       return [];
     }
 
@@ -106,65 +114,94 @@ async function getPosts() {
       `VXTwitter ha restituito ${data.latest_tweets.length} tweet`
     );
 
-    // DEBUG: mostra il primo tweet ricevuto
-    console.log(
-      JSON.stringify(data.latest_tweets[0], null, 2)
-    );
-
     const now = Date.now();
 
     const posts = data.latest_tweets
       .map((tweet) => {
-        const tweetId = tweet.tweetID || tweet.id;
+        const tweetId =
+          tweet.tweetID ||
+          tweet.id;
 
-        if (!tweetId) return null;
+        if (!tweetId) {
+          return null;
+        }
 
-        const createdAt = tweet.date || null;
+        const createdAt =
+          tweet.date ||
+          null;
 
-        // -----------------------------
+        // ====================================================
         // MEDIA
-        // -----------------------------
+        // ====================================================
 
         let media = null;
         let mediaType = null;
 
-        // Prima proviamo media_extended
-        if (
-          Array.isArray(tweet.media_extended) &&
-          tweet.media_extended.length > 0
-        ) {
-          const firstMedia = tweet.media_extended[0];
+        const extended =
+          Array.isArray(tweet.media_extended)
+            ? tweet.media_extended
+            : [];
 
-          if (firstMedia.type === "video") {
-            mediaType = "video";
+        // ----------------------------------------------------
+        // CERCA PRIMA UN VIDEO
+        // ----------------------------------------------------
 
-            // VXTwitter può avere diverse proprietà a seconda
-            // della versione della risposta.
-            media =
-              firstMedia.url ||
-              firstMedia.thumbnail_url ||
-              null;
-          } else if (firstMedia.type === "image") {
+        const videoMedia = extended.find(
+          (item) =>
+            item &&
+            item.type === "video"
+        );
+
+        if (videoMedia) {
+          mediaType = "video";
+
+          media =
+            videoMedia.url ||
+            videoMedia.thumbnail_url ||
+            null;
+        }
+
+        // ----------------------------------------------------
+        // SE NON C'È VIDEO, CERCA UN'IMMAGINE
+        // ----------------------------------------------------
+
+        if (!media) {
+          const imageMedia = extended.find(
+            (item) =>
+              item &&
+              item.type === "image"
+          );
+
+          if (imageMedia) {
             mediaType = "image";
-            media = firstMedia.url || null;
+
+            media =
+              imageMedia.url ||
+              imageMedia.thumbnail_url ||
+              null;
           }
         }
 
-        // Fallback per mediaURLs
-        if (!media && Array.isArray(tweet.mediaURLs)) {
-          if (tweet.mediaURLs.length > 0) {
-            media = tweet.mediaURLs[0];
+        // ----------------------------------------------------
+        // FALLBACK mediaURLs
+        // ----------------------------------------------------
 
-            const mediaUrl = String(media);
+        if (
+          !media &&
+          Array.isArray(tweet.mediaURLs) &&
+          tweet.mediaURLs.length > 0
+        ) {
+          media = tweet.mediaURLs[0];
 
-            if (
-              mediaUrl.includes(".mp4") ||
-              mediaUrl.includes(".m3u8")
-            ) {
-              mediaType = "video";
-            } else {
-              mediaType = "image";
-            }
+          const mediaUrl = String(media);
+
+          if (
+            mediaUrl.includes(".mp4") ||
+            mediaUrl.includes(".m3u8")
+          ) {
+            mediaType = "video";
+          } else {
+            mediaType = "image";
           }
         }
 
@@ -175,7 +212,7 @@ async function getPosts() {
 
           url:
             tweet.tweetURL ||
-            `https://x.com/${username}/status/${tweetId}`,
+            `https://x.com/${USERNAME}/status/${tweetId}`,
 
           created_at: createdAt,
 
@@ -186,7 +223,7 @@ async function getPosts() {
 
             screen_name:
               tweet.user_screen_name ||
-              username,
+              USERNAME,
 
             avatar_url:
               tweet.user_profile_image_url ||
@@ -199,9 +236,9 @@ async function getPosts() {
       })
       .filter(Boolean);
 
-    // -----------------------------
+    // ========================================================
     // FILTRO TEMPORALE
-    // -----------------------------
+    // ========================================================
 
     const recentPosts = posts.filter((post) => {
       if (!post.created_at) {
@@ -226,18 +263,18 @@ async function getPosts() {
       const age = now - tweetTime;
 
       console.log(
-        `Tweet ${post.id}: ${post.created_at} | età: ${Math.round(
-          age / 60000
-        )} minuti | ${post.mediaType || "text"}`
+        `Tweet ${post.id}: ${post.created_at} | ` +
+        `età: ${Math.round(age / 60000)} minuti | ` +
+        `${post.mediaType || "text"}`
       );
 
-      // Ignora tweet futuri
+      // Tweet nel futuro: ignoralo
       if (age < 0) {
         return false;
       }
 
-      // Ignora tweet più vecchi di 10 minuti
-      if (age > 10 * 60 * 1000) {
+      // Tweet troppo vecchio: ignoralo
+      if (age > MAX_AGE_MS) {
         return false;
       }
 
@@ -259,6 +296,7 @@ async function getPosts() {
     return [];
   }
 }
+
 // ============================================================
 // DISCORD
 // ============================================================
@@ -266,15 +304,25 @@ async function getPosts() {
 async function sendToDiscord(post) {
   const author = post.author || {};
 
-  const authorName = author.name || "Anime News And Facts";
+  const authorName =
+    author.name ||
+    "Anime News And Facts";
 
-  const username = author.screen_name || USERNAME;
+  const username =
+    author.screen_name ||
+    USERNAME;
 
-  const avatar = author.avatar_url || undefined;
+  const avatar =
+    author.avatar_url ||
+    undefined;
 
-  const textContent = cleanText(post.text || "");
+  const textContent =
+    cleanText(post.text || "");
 
-  const description = textContent.length > 0 ? truncate(textContent, 4000) : " ";
+  const description =
+    textContent.length > 0
+      ? truncate(textContent, 4000)
+      : " ";
 
   let isoTimestamp;
 
@@ -291,31 +339,42 @@ async function sendToDiscord(post) {
   // ==========================================================
 
   if (post.mediaType === "video") {
-    const fxUrl = getFxTwitterUrl(post.url);
+    const fxUrl =
+      getFxTwitterUrl(post.url);
 
     const payload = {
       username: "Anime News & Facts",
 
-      ...(avatar ? { avatar_url: avatar } : {}),
+      ...(avatar
+        ? { avatar_url: avatar }
+        : {}),
 
-      content: fxUrl || post.url,
+      content:
+        fxUrl ||
+        post.url
     };
 
-    console.log(`Invio VIDEO tramite FxTwitter: ${fxUrl}`);
+    console.log(
+      `Invio VIDEO tramite FxTwitter: ${fxUrl}`
+    );
 
-    const response = await fetch(WEBHOOK, {
-      method: "POST",
+    const response = await fetch(
+      WEBHOOK,
+      {
+        method: "POST",
 
-      headers: {
-        "Content-Type": "application/json",
-      },
+        headers: {
+          "Content-Type": "application/json"
+        },
 
-      body: JSON.stringify(payload),
-    });
+        body: JSON.stringify(payload)
+      }
+    );
 
     if (!response.ok) {
       throw new Error(
-        `Discord error ${response.status}: ${await response.text()}`
+        `Discord error ${response.status}: ` +
+        `${await response.text()}`
       );
     }
 
@@ -336,47 +395,62 @@ async function sendToDiscord(post) {
     color: 0x5865f2,
 
     author: {
-      name: `${authorName} (@${username})`,
+      name:
+        `${authorName} (@${username})`,
 
-      url: `https://x.com/${username}`,
+      url:
+        `https://x.com/${username}`,
 
-      ...(avatar ? { icon_url: avatar } : {}),
+      ...(avatar
+        ? { icon_url: avatar }
+        : {})
     },
 
     footer: {
-      text: "Anime News & Facts • X",
+      text:
+        "Anime News & Facts • X"
     },
 
-    timestamp: isoTimestamp,
+    timestamp: isoTimestamp
   };
 
-  if (post.mediaType === "image" && post.media) {
+  if (
+    post.mediaType === "image" &&
+    post.media
+  ) {
     embed.image = {
-      url: post.media,
+      url: post.media
     };
   }
 
   const payload = {
-    username: "Anime News & Facts",
+    username:
+      "Anime News & Facts",
 
-    ...(avatar ? { avatar_url: avatar } : {}),
+    ...(avatar
+      ? { avatar_url: avatar }
+      : {}),
 
-    embeds: [embed],
+    embeds: [embed]
   };
 
-  const response = await fetch(WEBHOOK, {
-    method: "POST",
+  const response = await fetch(
+    WEBHOOK,
+    {
+      method: "POST",
 
-    headers: {
-      "Content-Type": "application/json",
-    },
+      headers: {
+        "Content-Type": "application/json"
+      },
 
-    body: JSON.stringify(payload),
-  });
+      body: JSON.stringify(payload)
+    }
+  );
 
   if (!response.ok) {
     throw new Error(
-      `Discord error ${response.status}: ${await response.text()}`
+      `Discord error ${response.status}: ` +
+      `${await response.text()}`
     );
   }
 }
@@ -387,53 +461,72 @@ async function sendToDiscord(post) {
 
 async function main() {
   if (!WEBHOOK) {
-    console.error("DISCORD_WEBHOOK_URL non impostata!");
+    console.error(
+      "DISCORD_WEBHOOK_URL non impostata!"
+    );
 
     process.exit(1);
   }
 
   const state = loadState();
 
-  console.log(`State: ${state.ids.length} ID salvati.`);
-
-  const posts = await getPosts();
-
-  if (!posts.length) {
-    console.log("Nessun post recente trovato.");
-
-    return;
-  }
-
-  // ----------------------------------------------------------
-  // FILTRA QUELLI GIÀ PUBBLICATI
-  // ----------------------------------------------------------
-
-  const newPosts = posts.filter((post) => !state.ids.includes(post.id));
-
-  if (!newPosts.length) {
-    console.log("Nessun nuovo post da pubblicare.");
-
-    return;
-  }
-
-  // ----------------------------------------------------------
-  // DAL PIÙ VECCHIO AL PIÙ NUOVO
-  // ----------------------------------------------------------
-
-  const sortedPosts = [...newPosts].sort(
-    (a, b) =>
-      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  console.log(
+    `State: ${state.ids.length} ID salvati.`
   );
 
-  console.log(`Nuovi post da pubblicare: ${sortedPosts.length}`);
+  const posts =
+    await getPosts();
 
-  // ----------------------------------------------------------
+  if (!posts.length) {
+    console.log(
+      "Nessun post recente trovato."
+    );
+
+    return;
+  }
+
+  // ========================================================
+  // FILTRA GIÀ PUBBLICATI
+  // ========================================================
+
+  const newPosts =
+    posts.filter(
+      (post) =>
+        !state.ids.includes(post.id)
+    );
+
+  if (!newPosts.length) {
+    console.log(
+      "Nessun nuovo post da pubblicare."
+    );
+
+    return;
+  }
+
+  // ========================================================
+  // DAL PIÙ VECCHIO AL PIÙ NUOVO
+  // ========================================================
+
+  const sortedPosts =
+    [...newPosts].sort(
+      (a, b) =>
+        new Date(a.created_at).getTime() -
+        new Date(b.created_at).getTime()
+    );
+
+  console.log(
+    `Nuovi post da pubblicare: ${sortedPosts.length}`
+  );
+
+  // ========================================================
   // INVIO
-  // ----------------------------------------------------------
+  // ========================================================
 
   for (const post of sortedPosts) {
     console.log(
-      `Pubblico ${post.id} | ${post.created_at} | ${post.mediaType || "text"}`
+      `Pubblico ${post.id} | ` +
+      `${post.created_at} | ` +
+      `${post.mediaType || "text"}`
     );
 
     try {
@@ -441,12 +534,15 @@ async function main() {
 
       state.ids.push(post.id);
 
-      console.log(`Post ${post.id} inviato correttamente.`);
-    } catch (err) {
-      console.error(`Errore invio post ${post.id}:`, err.message);
+      console.log(
+        `Post ${post.id} inviato correttamente.`
+      );
 
-      // Non lo aggiungiamo allo state se Discord fallisce.
-      // Così verrà riprovato alla prossima esecuzione.
+    } catch (err) {
+      console.error(
+        `Errore invio post ${post.id}:`,
+        err.message
+      );
     }
   }
 

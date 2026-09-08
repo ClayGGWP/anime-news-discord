@@ -7,7 +7,7 @@ const USERNAME = "AniNewsAndFacts";
 
 // Accetta solamente post degli ultimi 30 minuti.
 // Lo state impedisce comunque i duplicati.
-const MAX_AGE_MS = 30 * 60 * 1000;
+const MAX_AGE_MS = 60 * 60 * 1000;
 
 // ============================================================
 // STATE

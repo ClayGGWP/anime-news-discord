@@ -32,109 +32,59 @@ function truncate(text, length) {
 }
 
 async function getPosts() {
-  const sources = [
-    {
-      url: "https://rsshub.app/twitter/user/AniNewsAndFacts",
-      type: "rsshub"
-    },
-    {
-      url: "https://api.vxtwitter.com/AniNewsAndFacts",
-      type: "vxtwitter"
-    },
-    {
-      url: "https://nitter.net/AniNewsAndFacts/rss",
-      type: "nitter"
-    },
-    {
-      url: "https://nitter.cz/AniNewsAndFacts/rss",
-      type: "nitter"
+  const username = "AniNewsAndFacts";
+
+  try {
+    const url = `https://api.vxtwitter.com/${username}?with_tweets=true`;
+
+    console.log(`Tentativo di connessione a: ${url}`);
+
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0"
+      }
+    });
+
+    if (!response.ok) {
+      console.log(`Risposta non valida: ${response.status}`);
+      console.log(await response.text());
+      return [];
     }
-  ];
 
-  for (const src of sources) {
-    try {
-      console.log(`Tentativo di connessione a: ${src.url}`);
-      const response = await fetch(src.url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-        }
-      });
+    const data = await response.json();
 
-      if (!response.ok) {
-        console.log(`Risposta non valida da ${src.url}: ${response.status}`);
-        continue;
-      }
+    console.log("Risposta VXTwitter ricevuta.");
 
-      if (src.type === "vxtwitter") {
-        const data = await response.json();
-        // Se restituisce un singolo tweet valido con id specifico
-        if (data && data.tweet_id) {
-          return [{
-            id: String(data.tweet_id),
-            text: data.text || "",
-            url: data.tweetURL || `https://x.com/AniNewsAndFacts/status/${data.tweet_id}`,
-            created_at: data.date,
-            author: {
-              name: data.user_name || "Anime News And Facts",
-              screen_name: data.user_screen_name || "AniNewsAndFacts",
-              avatar_url: data.user_profile_image_url
-            },
-            media: data.mediaURLs && data.mediaURLs.length > 0 ? data.mediaURLs[0] : null
-          }];
-        }
-        continue;
-      }
-
-      // Parsing XML RSS per RSSHub / Nitter
-      const xmlText = await response.text();
-      if (!xmlText.includes("<item>")) continue;
-
-      const items = [];
-      const itemRegex = /<item>([\s\S]*?)<\/item>/g;
-      let match;
-
-      while ((match = itemRegex.exec(xmlText)) !== null) {
-        const itemContent = match[1];
-
-        const title = (itemContent.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/) || itemContent.match(/<title>([\s\S]*?)<\/title>/))?.[1] || "";
-        const link = (itemContent.match(/<link>([\s\S]*?)<\/link>/))?.[1] || "";
-        const pubDate = (itemContent.match(/<pubDate>([\s\S]*?)<\/pubDate>/))?.[1] || "";
-        const description = (itemContent.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/) || itemContent.match(/<description>([\s\S]*?)<\/description>/))?.[1] || "";
-
-        // Estrazione ID tweet
-        const tweetId = link.split("/status/")[1]?.split("#")[0] || link.split("/").pop();
-
-        // Estrazione Immagine
-        const imgMatch = description.match(/<img[^>]+src=["']([^"']+)["']/);
-        const imageUrl = imgMatch ? imgMatch[1] : null;
-
-        const cleanDesc = description.replace(/<[^>]*>?/gm, "").trim();
-
-        if (tweetId && tweetId.length > 5) {
-          items.push({
-            id: String(tweetId),
-            text: cleanDesc || title,
-            url: `https://x.com/AniNewsAndFacts/status/${tweetId}`,
-            created_at: pubDate,
-            author: {
-              name: "Anime News And Facts",
-              screen_name: "AniNewsAndFacts"
-            },
-            media: imageUrl
-          });
-        }
-      }
-
-      if (items.length > 0) {
-        console.log(`Recuperati ${items.length} post da ${src.url}`);
-        return items;
-      }
-    } catch (err) {
-      console.error(`Errore durante la chiamata a ${src.url}:`, err.message);
+    if (!data.latest_tweets || !Array.isArray(data.latest_tweets)) {
+      console.log("VXTwitter non ha restituito latest_tweets.");
+      console.log(data);
+      return [];
     }
+
+    return data.latest_tweets.map((tweet) => ({
+      id: String(tweet.tweetID || tweet.id),
+      text: tweet.text || "",
+      url:
+        tweet.tweetURL ||
+        `https://x.com/${username}/status/${tweet.tweetID}`,
+
+      created_at: tweet.date || null,
+
+      author: {
+        name: tweet.user_name || "Anime News And Facts",
+        screen_name: tweet.user_screen_name || username,
+        avatar_url: tweet.user_profile_image_url || null
+      },
+
+      media:
+        tweet.mediaURLs && tweet.mediaURLs.length > 0
+          ? tweet.mediaURLs[0]
+          : null
+    }));
+  } catch (err) {
+    console.error("Errore VXTwitter:", err.message);
+    return [];
   }
-
-  return [];
 }
 
 async function sendToDiscord(post) {

@@ -523,6 +523,8 @@ async function sendToDiscord(post) {
 
   const payload = {
   username: "Kim Jong Un",
+  content:
+    `<${post.url}>`,
   embeds: [
     embed
   ]

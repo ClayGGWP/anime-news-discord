@@ -339,7 +339,7 @@ async function sendToDiscord(post) {
 
   const authorName =
     author.name ||
-    "Anime News And Facts";
+    "Kim Jong Un";
 
   const username =
     author.screen_name ||
@@ -499,7 +499,7 @@ async function sendToDiscord(post) {
 
   const payload = {
     username:
-      "Anime News & Facts",
+      "Kim Jong Un",
 
     ...(avatar
       ? {

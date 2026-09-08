@@ -75,167 +75,190 @@ function getFxTwitterUrl(postUrl) {
 // ============================================================
 
 async function getPosts() {
-  const url =
-    `https://api.fxtwitter.com/2/user/${USERNAME}/tweets` +
-    `?count=${POST_COUNT}`;
+  const username = "AniNewsAndFacts";
 
   try {
+    const url = `https://api.vxtwitter.com/${username}?with_tweets=true`;
+
     console.log(`Connessione a: ${url}`);
 
     const response = await fetch(url, {
       headers: {
-        "User-Agent": "AnimeNewsDiscordBot/1.0",
-      },
+        "User-Agent": "Mozilla/5.0"
+      }
     });
 
     if (!response.ok) {
-      console.error(
-        `FxTwitter HTTP ${response.status}:`,
-        await response.text()
-      );
-
+      console.error(`VXTwitter HTTP ${response.status}`);
+      console.error(await response.text());
       return [];
     }
 
     const data = await response.json();
 
-    if (!Array.isArray(data.results)) {
-      console.log("FxTwitter non ha restituito results.");
+    if (!Array.isArray(data.latest_tweets)) {
+      console.error("VXTwitter non ha restituito latest_tweets.");
+      console.log(JSON.stringify(data, null, 2));
       return [];
     }
 
-    console.log(`FxTwitter ha restituito ${data.results.length} post.`);
+    console.log(
+      `VXTwitter ha restituito ${data.latest_tweets.length} tweet`
+    );
+
+    // DEBUG: mostra il primo tweet ricevuto
+    console.log(
+      JSON.stringify(data.latest_tweets[0], null, 2)
+    );
 
     const now = Date.now();
 
-    const posts = [];
+    const posts = data.latest_tweets
+      .map((tweet) => {
+        const tweetId = tweet.tweetID || tweet.id;
 
-    for (const tweet of data.results) {
-      if (!tweet || !tweet.id) {
-        continue;
+        if (!tweetId) return null;
+
+        const createdAt = tweet.date || null;
+
+        // -----------------------------
+        // MEDIA
+        // -----------------------------
+
+        let media = null;
+        let mediaType = null;
+
+        // Prima proviamo media_extended
+        if (
+          Array.isArray(tweet.media_extended) &&
+          tweet.media_extended.length > 0
+        ) {
+          const firstMedia = tweet.media_extended[0];
+
+          if (firstMedia.type === "video") {
+            mediaType = "video";
+
+            // VXTwitter può avere diverse proprietà a seconda
+            // della versione della risposta.
+            media =
+              firstMedia.url ||
+              firstMedia.thumbnail_url ||
+              null;
+          } else if (firstMedia.type === "image") {
+            mediaType = "image";
+            media = firstMedia.url || null;
+          }
+        }
+
+        // Fallback per mediaURLs
+        if (!media && Array.isArray(tweet.mediaURLs)) {
+          if (tweet.mediaURLs.length > 0) {
+            media = tweet.mediaURLs[0];
+
+            const mediaUrl = String(media);
+
+            if (
+              mediaUrl.includes(".mp4") ||
+              mediaUrl.includes(".m3u8")
+            ) {
+              mediaType = "video";
+            } else {
+              mediaType = "image";
+            }
+          }
+        }
+
+        return {
+          id: String(tweetId),
+
+          text: tweet.text || "",
+
+          url:
+            tweet.tweetURL ||
+            `https://x.com/${username}/status/${tweetId}`,
+
+          created_at: createdAt,
+
+          author: {
+            name:
+              tweet.user_name ||
+              "Anime News And Facts",
+
+            screen_name:
+              tweet.user_screen_name ||
+              username,
+
+            avatar_url:
+              tweet.user_profile_image_url ||
+              null
+          },
+
+          media,
+          mediaType
+        };
+      })
+      .filter(Boolean);
+
+    // -----------------------------
+    // FILTRO TEMPORALE
+    // -----------------------------
+
+    const recentPosts = posts.filter((post) => {
+      if (!post.created_at) {
+        console.log(
+          `Tweet ${post.id}: data assente, ignorato`
+        );
+
+        return false;
       }
 
-      // --------------------------------------------------------
-      // DATA
-      // --------------------------------------------------------
-
-      let createdAt = tweet.created_at || null;
-
-      let tweetTime = createdAt ? new Date(createdAt).getTime() : NaN;
-
-      // Se created_at non è interpretabile, proviamo timestamp.
-      if (
-        !Number.isFinite(tweetTime) &&
-        Number.isFinite(tweet.created_timestamp)
-      ) {
-        tweetTime = tweet.created_timestamp * 1000;
-        createdAt = new Date(tweetTime).toISOString();
-      }
+      const tweetTime =
+        new Date(post.created_at).getTime();
 
       if (!Number.isFinite(tweetTime)) {
-        console.log(`Post ${tweet.id}: data non valida, ignorato.`);
+        console.log(
+          `Tweet ${post.id}: data non valida (${post.created_at})`
+        );
 
-        continue;
+        return false;
       }
 
       const age = now - tweetTime;
 
-      // --------------------------------------------------------
-      // FILTRO TEMPORALE
-      // --------------------------------------------------------
+      console.log(
+        `Tweet ${post.id}: ${post.created_at} | età: ${Math.round(
+          age / 60000
+        )} minuti | ${post.mediaType || "text"}`
+      );
 
+      // Ignora tweet futuri
       if (age < 0) {
-        console.log(`Post ${tweet.id}: data futura, ignorato.`);
-
-        continue;
+        return false;
       }
 
-      if (age > MAX_AGE_MS) {
-        console.log(
-          `Post ${tweet.id}: troppo vecchio (${Math.round(
-            age / 60000
-          )} min), ignorato.`
-        );
-
-        continue;
+      // Ignora tweet più vecchi di 10 minuti
+      if (age > 10 * 60 * 1000) {
+        return false;
       }
 
-      // --------------------------------------------------------
-      // AUTHOR
-      // --------------------------------------------------------
+      return true;
+    });
 
-      const author = tweet.author || {};
+    console.log(
+      `Tweet recenti: ${recentPosts.length}`
+    );
 
-      // --------------------------------------------------------
-      // MEDIA
-      // --------------------------------------------------------
+    return recentPosts;
 
-      let media = null;
-      let mediaType = null;
-      let thumbnail = null;
-
-      const allMedia = tweet.media?.all || [];
-
-      if (Array.isArray(tweet.media?.videos) && tweet.media.videos.length) {
-        const video = tweet.media.videos[0];
-
-        media = video.url || null;
-        mediaType = "video";
-        thumbnail = video.thumbnail_url || null;
-      } else if (
-        Array.isArray(tweet.media?.photos) &&
-        tweet.media.photos.length
-      ) {
-        const photo = tweet.media.photos[0];
-
-        media = photo.url || null;
-        mediaType = "image";
-      } else if (Array.isArray(allMedia) && allMedia.length) {
-        const first = allMedia[0];
-
-        media = first.url || null;
-
-        if (first.type === "video" || first.type === "gif") {
-          mediaType = "video";
-          thumbnail = first.thumbnail_url || null;
-        } else {
-          mediaType = "image";
-        }
-      }
-
-      posts.push({
-        id: String(tweet.id),
-
-        text: tweet.text || "",
-
-        url: tweet.url || `https://x.com/${USERNAME}/status/${tweet.id}`,
-
-        created_at: createdAt,
-
-        author: {
-          name: author.name || "Anime News And Facts",
-
-          screen_name: author.screen_name || USERNAME,
-
-          avatar_url: author.avatar_url || null,
-        },
-
-        media,
-        mediaType,
-        thumbnail,
-      });
-    }
-
-    console.log(`Post entro la finestra temporale: ${posts.length}`);
-
-    return posts;
   } catch (err) {
-    console.error("Errore durante la chiamata a FxTwitter:", err.message);
+    console.error(
+      "Errore durante la chiamata VXTwitter:",
+      err.message
+    );
 
     return [];
   }
 }
-
 // ============================================================
 // DISCORD
 // ============================================================

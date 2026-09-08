@@ -3,7 +3,7 @@ name: "Anime News -> Discord"
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"  # Esegue ogni 5 minuti (il minimo consentito da GitHub)
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: write
@@ -15,6 +15,9 @@ jobs:
     steps:
       - name: Scarica repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
 
       - name: Configura Node.js
         uses: actions/setup-node@v4
@@ -28,6 +31,8 @@ jobs:
           node bot.js
 
       - name: Salva stato
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if git diff --quiet state.json; then
             echo "Nessuna modifica."
@@ -38,5 +43,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add state.json
-          git commit -m "Update Anime News state"
-          git push origin main
+          git commit -m "Update Anime News state [skip ci]"
+          git push https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git HEAD:main

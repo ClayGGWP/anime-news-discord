@@ -1,14 +1,12 @@
 import fs from "node:fs";
 
 const WEBHOOK = process.env.DISCORD_WEBHOOK_URL;
-const API_URL = "https://api.fxtwitter.com/AniNewsAndFacts";
 const STATE_FILE = "state.json";
 
 function loadState() {
   try {
     if (fs.existsSync(STATE_FILE)) {
-      const data = fs.readFileSync(STATE_FILE, "utf8");
-      return JSON.parse(data);
+      return JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
     }
   } catch (e) {
     console.error("Errore lettura state.json:", e);
@@ -33,41 +31,68 @@ function truncate(text, length) {
   return text.slice(0, length - 3) + "...";
 }
 
-function getMedia(post) {
-  if (post.media && post.media.photos && post.media.photos.length > 0) {
-    return post.media.photos[0].url;
-  }
-  if (post.media && post.media.mosaic && post.media.mosaic.formats) {
-    return post.media.mosaic.formats.jpeg || post.media.mosaic.formats.webp;
-  }
-  return undefined;
-}
-
 async function getPosts() {
-  const response = await fetch(API_URL);
-  if (!response.ok) {
-    throw new Error(`API error ${response.status}: ${await response.text()}`);
-  }
-  const data = await response.json();
+  const endpoints = [
+    "https://api.vxtwitter.com/AniNewsAndFacts",
+    "https://api.fxtwitter.com/AniNewsAndFacts"
+  ];
 
-  // Supporta sia la risposta v1 (data.tweet) sia le liste (data.tweets)
-  if (data.tweet) {
-    return [data.tweet];
+  for (const url of endpoints) {
+    try {
+      console.log(`Tentativo di connessione a: ${url}`);
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+      });
+
+      if (!response.ok) {
+        console.log(`Risposta non valida da ${url}: ${response.status}`);
+        continue;
+      }
+
+      const data = await response.json();
+
+      // Formato VxTwitter / FxTwitter v1
+      if (data && (data.tweet_id || data.id_str || data.id)) {
+        return [{
+          id: String(data.tweet_id || data.id_str || data.id),
+          text: data.text || data.description || "",
+          url: data.tweetURL || data.url || "https://x.com/AniNewsAndFacts",
+          created_at: data.date || data.created_at,
+          author: {
+            name: data.user_name || "Anime News And Facts",
+            screen_name: data.user_screen_name || "AniNewsAndFacts",
+            avatar_url: data.user_profile_image_url
+          },
+          media: data.mediaURLs && data.mediaURLs.length > 0 ? data.mediaURLs[0] : null
+        }];
+      }
+
+      // Formato FxTwitter v2
+      if (data.tweets && Array.isArray(data.tweets) && data.tweets.length > 0) {
+        return data.tweets.map(t => ({
+          id: String(t.id),
+          text: t.text || "",
+          url: t.url || `https://x.com/AniNewsAndFacts/status/${t.id}`,
+          created_at: t.created_at,
+          author: t.author,
+          media: t.media?.photos?.[0]?.url || null
+        }));
+      }
+    } catch (err) {
+      console.error(`Errore durante la chiamata a ${url}:`, err.message);
+    }
   }
-  if (data.tweets && Array.isArray(data.tweets)) {
-    return data.tweets;
-  }
-  
+
   return [];
 }
 
 async function sendToDiscord(post) {
   const author = post.author || {};
-
   const authorName = author.name || "Anime News And Facts";
   const username = author.screen_name || "AniNewsAndFacts";
   const avatar = author.avatar_url || undefined;
-  const image = getMedia(post);
 
   const textContent = cleanText(post.text || "");
   const description = textContent.length > 0 ? truncate(textContent, 4000) : " ";
@@ -75,19 +100,15 @@ async function sendToDiscord(post) {
   let isoTimestamp;
   if (post.created_at) {
     isoTimestamp = new Date(post.created_at).toISOString();
-  } else if (post.created_timestamp) {
-    isoTimestamp = new Date(post.created_timestamp * 1000).toISOString();
   } else {
     isoTimestamp = new Date().toISOString();
   }
 
-  const postUrl = post.url || `https://x.com/${username}/status/${post.id}`;
-
   const embed = {
     title: "📰 ANIME NEWS",
-    url: postUrl,
+    url: post.url,
     description: description,
-    color: 0x5865f2,
+    color: 0x5865F2,
     author: {
       name: `${authorName} (@${username})`,
       url: `https://x.com/${username}`,
@@ -99,10 +120,8 @@ async function sendToDiscord(post) {
     timestamp: isoTimestamp
   };
 
-  if (image) {
-    embed.image = {
-      url: image
-    };
+  if (post.media) {
+    embed.image = { url: post.media };
   }
 
   const payload = {
@@ -113,15 +132,12 @@ async function sendToDiscord(post) {
 
   const response = await fetch(WEBHOOK, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Discord error ${response.status}: ${error}`);
+    throw new Error(`Discord error ${response.status}: ${await response.text()}`);
   }
 }
 
@@ -135,32 +151,19 @@ async function main() {
   const posts = await getPosts();
 
   if (!posts.length) {
-    console.log("Nessun post trovato.");
+    console.log("Nessun post recuperato dalle API.");
     return;
   }
 
-  // Ordina dal meno recente al più recente
-  const sorted = [...posts].sort((a, b) => (a.id > b.id ? 1 : -1));
-
-  // Prima esecuzione: invia l'ultimo post e salva gli ID
-  if (state.ids.length === 0) {
-    const latest = sorted[sorted.length - 1];
-    console.log(`Prima esecuzione: pubblico il post ${latest.id}`);
-    await sendToDiscord(latest);
-    saveState(sorted.map((p) => p.id));
-    return;
-  }
-
-  // Esecuzioni successive: invia solo i nuovi post
-  const newPosts = sorted.filter((p) => !state.ids.includes(p.id));
+  const newPosts = posts.filter((p) => !state.ids.includes(p.id));
 
   if (newPosts.length === 0) {
-    console.log("Nessun nuovo post.");
+    console.log("Nessun nuovo post da pubblicare.");
     return;
   }
 
   for (const post of newPosts) {
-    console.log(`Pubblico post: ${post.id}`);
+    console.log(`Pubblico post ID: ${post.id}`);
     await sendToDiscord(post);
     state.ids.push(post.id);
   }

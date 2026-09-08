@@ -23,7 +23,10 @@ function saveState(ids) {
 }
 
 function cleanText(text) {
-  return text.replace(/https:\/\/t\.co\/\w+/g, "").trim();
+  return text
+    .replace(/<[^>]*>?/gm, "") // Rimuove tag HTML del feed RSS
+    .replace(/https:\/\/t\.co\/\w+/g, "") // Rimuove t.co link
+    .trim();
 }
 
 function truncate(text, length) {
@@ -32,12 +35,13 @@ function truncate(text, length) {
 }
 
 async function getPosts() {
-  const endpoints = [
-    "https://api.vxtwitter.com/AniNewsAndFacts",
-    "https://api.fxtwitter.com/AniNewsAndFacts"
+  const rssUrls = [
+    "https://rsshub.app/twitter/user/AniNewsAndFacts",
+    "https://nitter.privacydev.net/AniNewsAndFacts/rss",
+    "https://nitter.poast.org/AniNewsAndFacts/rss"
   ];
 
-  for (const url of endpoints) {
+  for (const url of rssUrls) {
     try {
       console.log(`Tentativo di connessione a: ${url}`);
       const response = await fetch(url, {
@@ -51,34 +55,46 @@ async function getPosts() {
         continue;
       }
 
-      const data = await response.json();
+      const xmlText = await response.text();
+      const items = [];
+      const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+      let match;
 
-      // Formato VxTwitter / FxTwitter v1
-      if (data && (data.tweet_id || data.id_str || data.id)) {
-        return [{
-          id: String(data.tweet_id || data.id_str || data.id),
-          text: data.text || data.description || "",
-          url: data.tweetURL || data.url || "https://x.com/AniNewsAndFacts",
-          created_at: data.date || data.created_at,
-          author: {
-            name: data.user_name || "Anime News And Facts",
-            screen_name: data.user_screen_name || "AniNewsAndFacts",
-            avatar_url: data.user_profile_image_url
-          },
-          media: data.mediaURLs && data.mediaURLs.length > 0 ? data.mediaURLs[0] : null
-        }];
+      while ((match = itemRegex.exec(xmlText)) !== null) {
+        const itemContent = match[1];
+
+        const title = (itemContent.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/) || itemContent.match(/<title>([\s\S]*?)<\/title>/))?.[1] || "";
+        const link = (itemContent.match(/<link>([\s\S]*?)<\/link>/))?.[1] || "";
+        const pubDate = (itemContent.match(/<pubDate>([\s\S]*?)<\/pubDate>/))?.[1] || "";
+        const description = (itemContent.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/) || itemContent.match(/<description>([\s\S]*?)<\/description>/))?.[1] || "";
+
+        // Estrae l'ID univoco del tweet dal link
+        const tweetId = link.split("/status/")[1]?.split("#")[0] || link.split("/").pop();
+
+        // Estrae la prima immagine allegata se presente
+        const imgMatch = description.match(/<img[^>]+src=["']([^"']+)["']/);
+        const imageUrl = imgMatch ? imgMatch[1] : null;
+
+        const cleanDesc = cleanText(description);
+
+        if (tweetId) {
+          items.push({
+            id: String(tweetId),
+            text: cleanDesc || cleanText(title),
+            url: `https://x.com/AniNewsAndFacts/status/${tweetId}`,
+            created_at: pubDate,
+            author: {
+              name: "Anime News And Facts",
+              screen_name: "AniNewsAndFacts"
+            },
+            media: imageUrl
+          });
+        }
       }
 
-      // Formato FxTwitter v2
-      if (data.tweets && Array.isArray(data.tweets) && data.tweets.length > 0) {
-        return data.tweets.map(t => ({
-          id: String(t.id),
-          text: t.text || "",
-          url: t.url || `https://x.com/AniNewsAndFacts/status/${t.id}`,
-          created_at: t.created_at,
-          author: t.author,
-          media: t.media?.photos?.[0]?.url || null
-        }));
+      if (items.length > 0) {
+        console.log(`Recuperati ${items.length} post da RSS.`);
+        return items;
       }
     } catch (err) {
       console.error(`Errore durante la chiamata a ${url}:`, err.message);
@@ -155,6 +171,7 @@ async function main() {
     return;
   }
 
+  // Filtra i post già salvati in state.json
   const newPosts = posts.filter((p) => !state.ids.includes(p.id));
 
   if (newPosts.length === 0) {
@@ -162,7 +179,10 @@ async function main() {
     return;
   }
 
-  for (const post of newPosts) {
+  // Ordina dal più vecchio al più recente per inviarli in ordine cronologico
+  const sortedPosts = [...newPosts].reverse();
+
+  for (const post of sortedPosts) {
     console.log(`Pubblico post ID: ${post.id}`);
     await sendToDiscord(post);
     state.ids.push(post.id);

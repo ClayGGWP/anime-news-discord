@@ -3,7 +3,7 @@ import fs from "node:fs";
 const WEBHOOK = process.env.DISCORD_WEBHOOK_URL;
 const STATE_FILE = "state.json";
 
-const USERNAME = "Kim Jong Un";
+const USERNAME = "AniNewsAndFacts";
 
 // Accetta solamente post degli ultimi 30 minuti.
 // Lo state impedisce comunque i duplicati.

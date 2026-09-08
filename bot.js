@@ -32,48 +32,65 @@ function truncate(text, length) {
 }
 
 async function getPosts() {
-  const endpoints = [
-    "https://api.fxtwitter.com/AniNewsAndFacts/latest",
-    "https://api.vxtwitter.com/AniNewsAndFacts/latest",
-    "https://api.fxtwitter.com/2/profile/AniNewsAndFacts"
-  ];
+  const url = "https://syndication.twitter.com/srv/timeline-profile/history?screen_name=AniNewsAndFacts";
 
-  for (const url of endpoints) {
-    try {
-      console.log(`Tentativo di connessione a: ${url}`);
-      const response = await fetch(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-      });
-
-      if (!response.ok) {
-        console.log(`Risposta non valida da ${url}: ${response.status}`);
-        continue;
+  try {
+    console.log(`Tentativo di connessione a: ${url}`);
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
       }
+    });
 
-      const data = await response.json();
-
-      // Formato array di tweet (fxtwitter / vxtwitter)
-      const tweets = data.tweets || (data.tweet ? [data.tweet] : []);
-
-      if (tweets.length > 0) {
-        return tweets.map((t) => ({
-          id: String(t.id || t.tweet_id),
-          text: t.text || t.description || "",
-          url: t.url || t.tweetURL || `https://x.com/AniNewsAndFacts/status/${t.id || t.tweet_id}`,
-          created_at: t.created_at || t.date,
-          author: {
-            name: t.author?.name || t.user_name || "Anime News And Facts",
-            screen_name: t.author?.screen_name || t.user_screen_name || "AniNewsAndFacts",
-            avatar_url: t.author?.avatar_url || t.user_profile_image_url
-          },
-          media: t.media?.photos?.[0]?.url || (t.mediaURLs && t.mediaURLs[0]) || null
-        }));
-      }
-    } catch (err) {
-      console.error(`Errore durante la chiamata a ${url}:`, err.message);
+    if (!response.ok) {
+      console.log(`Risposta non valida: ${response.status}`);
+      return [];
     }
+
+    const html = await response.text();
+
+    // Estrae i dati JSON contenuti nello script __NEXT_DATA__
+    const jsonMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+    if (!jsonMatch) {
+      console.log("Impossibile trovare i dati della timeline nell'HTML.");
+      return [];
+    }
+
+    const jsonData = JSON.parse(jsonMatch[1]);
+    const entries = jsonData?.props?.pageProps?.timeline?.entries || [];
+
+    const posts = [];
+
+    for (const entry of entries) {
+      if (entry.type !== "tweet") continue;
+
+      const tweetData = entry.content?.tweet;
+      if (!tweetData) continue;
+
+      // Estrazione dei media (immagini)
+      const mediaPhotos = tweetData.mediaDetails?.filter(m => m.type === "photo") || [];
+      const imageUrl = mediaPhotos.length > 0 ? mediaPhotos[0].media_url_https : null;
+
+      posts.push({
+        id: String(tweetData.id_str || tweetData.id),
+        text: tweetData.text || "",
+        url: `https://x.com/AniNewsAndFacts/status/${tweetData.id_str || tweetData.id}`,
+        created_at: tweetData.created_at,
+        author: {
+          name: tweetData.user?.name || "Anime News And Facts",
+          screen_name: tweetData.user?.screen_name || "AniNewsAndFacts",
+          avatar_url: tweetData.user?.profile_image_url_https
+        },
+        media: imageUrl
+      });
+    }
+
+    console.log(`Recuperati ${posts.length} post reali.`);
+    return posts;
+
+  } catch (err) {
+    console.error(`Errore durante il recupero dei post:`, err.message);
   }
 
   return [];

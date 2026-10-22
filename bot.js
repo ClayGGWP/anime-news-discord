@@ -10,7 +10,7 @@ const fx = new FxTwitterV2({
 const WEBHOOK = process.env.DISCORD_WEBHOOK_URL;
 const STATE_FILE = "state.json";
 
-const USERNAME = "AniNewsAndFacts";
+const USERNAME = "animeupdates";
 
 const MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
